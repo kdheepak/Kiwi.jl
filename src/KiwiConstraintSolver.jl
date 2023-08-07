@@ -1,4 +1,4 @@
-module Kiwi
+module KiwiConstraintSolver
 
 using DataStructures
 using EnumX

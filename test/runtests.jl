@@ -1,3 +1,3 @@
 using ReTest
-import Kiwi
+import KiwiConstraintSolver as Kiwi
 Kiwi.runtests()

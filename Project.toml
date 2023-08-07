@@ -1,4 +1,4 @@
-name = "Kiwi"
+name = "KiwiConstraintSolver"
 uuid = "063317df-b1e6-4e84-b689-d7ba7b3726e4"
 authors = ["Dheepak Krishnamurthy"]
 version = "1.0.0"
