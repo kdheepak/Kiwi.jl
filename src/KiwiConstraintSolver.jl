@@ -150,9 +150,10 @@ end
 mutable struct Constraint
   expression::Expression
   strength::Float64
+  weight::Float64
   op::RelationalOperator.T
   function Constraint(e::Expression, strength::Real, op::RelationalOperator.T)
-    return new(reduce(e), clamp_strength(strength), op)
+    return new(reduce(e), clamp_strength(strength), 1, op)
   end
 end
 
