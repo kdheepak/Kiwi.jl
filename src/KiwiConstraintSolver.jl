@@ -35,6 +35,8 @@ function clamp_strength(value::Real)
 end
 
 """
+SymbolKind:
+
 - :INVALID
 - :EXTERNAL
 - :SLACK
@@ -148,10 +150,11 @@ function Base.show(io::IO, e::Expression)
 end
 
 """
+RelationalOperator:
 
-- <=
-- >=
-- ==
+- `<=`
+- `>=`
+- `==`
 """
 const RelationalOperator = Symbol
 
