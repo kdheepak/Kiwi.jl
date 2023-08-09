@@ -1292,7 +1292,7 @@ end
   end
 end
 
-export Solver, Variable, Constraint, Expression, Term, add_constraint, optimize!
+export Solver, Variable, Constraint, Expression, Term, add_constraint, update_variables, optimize!
 
 end
 
