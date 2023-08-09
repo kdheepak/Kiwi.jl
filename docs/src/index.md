@@ -1,14 +1,14 @@
 ```@meta
-CurrentModule = Kiwi
+CurrentModule = KiwiConstraintSolver
 ```
 
-# Kiwi
+# KiwiConstraintSolver
 
-Documentation for [Kiwi](https://github.com/kdheepak/Kiwi.jl).
+Documentation for [KiwiConstraintSolver](https://github.com/kdheepak/KiwiConstraintSolver.jl).
 
 ```@index
 ```
 
 ```@autodocs
-Modules = [Kiwi]
+Modules = [KiwiConstraintSolver]
 ```

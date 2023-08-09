@@ -57,6 +57,6 @@ jobs:
       - run: |
           julia --project=docs -e '
             using Documenter: DocMeta, doctest
-            using Kiwi
-            DocMeta.setdocmeta!(Kiwi, :DocTestSetup, :(using Kiwi); recursive=true)
-            doctest(Kiwi)'
+            using KiwiConstraintSolver
+            DocMeta.setdocmeta!(KiwiConstraintSolver, :DocTestSetup, :(using KiwiConstraintSolver); recursive=true)
+            doctest(KiwiConstraintSolver)'

@@ -1,16 +1,16 @@
-using Kiwi
+using KiwiConstraintSolver
 using Documenter
 
-DocMeta.setdocmeta!(Kiwi, :DocTestSetup, :(using Kiwi); recursive=true)
+DocMeta.setdocmeta!(KiwiConstraintSolver, :DocTestSetup, :(using KiwiConstraintSolver); recursive=true)
 
 makedocs(;
-    modules=[Kiwi],
+    modules=[KiwiConstraintSolver],
     authors="Dheepak Krishnamurthy",
-    repo="https://github.com/kdheepak/Kiwi.jl/blob/{commit}{path}#{line}",
-    sitename="Kiwi.jl",
+    repo="https://github.com/kdheepak/KiwiConstraintSolver.jl/blob/{commit}{path}#{line}",
+    sitename="KiwiConstraintSolver.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://kdheepak.github.io/Kiwi.jl",
+        canonical="https://kdheepak.github.io/KiwiConstraintSolver.jl",
         edit_link="main",
         assets=String[],
     ),
@@ -20,6 +20,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/kdheepak/Kiwi.jl",
+    repo="github.com/kdheepak/KiwiConstraintSolver.jl",
     devbranch="main",
 )
