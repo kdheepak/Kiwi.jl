@@ -8,6 +8,7 @@ DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 InlineTest = "bd334432-b1e7-49c7-a2dc-dd9149e4ebd6"
 
 [compat]
+DataStructures = "0.18"
 InlineTest = "0.2"
 ReTest = "0.3"
 julia = "1.8"
