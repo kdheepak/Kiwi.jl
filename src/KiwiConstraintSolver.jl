@@ -1,7 +1,13 @@
+"""
+This module contains an implementation of the Cassowary constraint solving algorithm, based upon the work by G.J. Badros et al. in 2001. 
+This algorithm is designed primarily for use constraining elements in user interfaces, but works well for many constraints that use floats.
+Constraints are linear combinations of the problem variables. 
+The notable features of Cassowary that make it ideal for user interfaces are that it is incremental (i.e. you can add and remove constraints at runtime and it will perform the minimum work to update the result) and that the constraints can be violated if necessary, with the order in which they are violated specified by setting a "strength" for each constraint.
+This allows the solution to gracefully degrade, which is useful for when a user interface needs to compromise on its constraints in order to still be able to display something.
+"""
 module KiwiConstraintSolver
 
 using DataStructures
-using EnumX
 using InlineTest
 
 import Base.isequal, Base.hash
@@ -15,6 +21,10 @@ function create_strength(a::Real, b::Real, c::Real, w::Real=1.0)
   return result
 end
 
+const ϵ = 1e-8
+
+is_approx_zero(value::Float64) = ≈(value, 0.0; atol=ϵ)
+
 const REQUIRED = create_strength(1000.0, 1000.0, 1000.0)
 const STRONG = create_strength(1.0, 0.0, 0.0)
 const MEDIUM = create_strength(0.0, 1.0, 0.0)
@@ -24,20 +34,21 @@ function clamp_strength(value::Real)
   return clamp(value, 0, REQUIRED)
 end
 
-@enumx SymbolKind begin
-  INVALID
-  EXTERNAL
-  SLACK
-  ERROR
-  DUMMY
-end
+"""
+- :INVALID
+- :EXTERNAL
+- :SLACK
+- :ERROR
+- :DUMMY
+"""
+const KiwiSymbolKind = Symbol
 
 mutable struct KiwiSymbol
   value::UInt32
-  kind::SymbolKind.T
+  kind::KiwiSymbolKind
 end
 
-KiwiSymbol() = KiwiSymbol(0, SymbolKind.INVALID)
+KiwiSymbol() = KiwiSymbol(0, :INVALID)
 
 isequal(s1::KiwiSymbol, s2::KiwiSymbol) = s1.value == s2.value && s1.kind == s2.kind
 hash(s::KiwiSymbol) = hash(string(hash(s.value)) * string(hash(s.kind)))
@@ -119,6 +130,14 @@ function is_constant(e::Expression)
   return isempty(e.terms)
 end
 
+"""Mutates this expression by multiplying it by minus one."""
+function negate(e::Expression)
+  e.constant = -e.constant
+  for (i, t) in enumerate(e.terms)
+    e.terms[i] = -1 * deepcopy(t)
+  end
+end
+
 function Base.show(io::IO, e::Expression)
   print(io, "is_constant: ", is_constant(e), ", constant: ", e.constant)
   if !is_constant(e)
@@ -128,11 +147,13 @@ function Base.show(io::IO, e::Expression)
   end
 end
 
-@enumx RelationalOperator begin
-  LE
-  GE
-  EQ
-end
+"""
+
+- <=
+- >=
+- ==
+"""
+const RelationalOperator = Symbol
 
 function reduce(e::Expression)
   vars = DefaultDict{Variable,Float64}(0.0)
@@ -151,8 +172,8 @@ mutable struct Constraint
   expression::Expression
   strength::Float64
   weight::Float64
-  op::RelationalOperator.T
-  function Constraint(e::Expression, strength::Real, op::RelationalOperator.T)
+  op::RelationalOperator
+  function Constraint(e::Expression, strength::Real, op::RelationalOperator)
     return new(reduce(e), clamp_strength(strength), 1, op)
   end
 end
@@ -160,7 +181,7 @@ end
 isequal(c1::Constraint, c2::Constraint) = isequal(c1.expression, c2.expression) && c1.op == c2.op
 hash(c::Constraint) = hash(string(hash(c.expression)) * string(hash(c.op)))
 
-function Constraint(e::Expression, op::RelationalOperator.T)
+function Constraint(e::Expression, op::RelationalOperator)
   return Constraint(e, REQUIRED, op)
 end
 
@@ -201,7 +222,7 @@ is zero, the symbol will be removed from the row.
 """
 function insert!(r::Row, symbol::KiwiSymbol, coefficient::Real=1.0)
   coefficient += get(r.cells, symbol, 0)
-  if coefficient ≈ 0.0
+  if is_approx_zero(coefficient)
     delete!(r.cells, symbol)
   else
     r.cells[symbol] = coefficient
@@ -218,13 +239,7 @@ coefficient of zero will be removed from the row.
 function insert!(r::Row, other::Row, coefficient::Real=1.0)
   r.constant += other.constant * coefficient
   for (s, v) in other.cells
-    coeff = v * coefficient
-    temp = get(r.cells, s, 0) + coeff
-    if temp ≈ 0.0
-      delete!(r.cells, s)
-    else
-      r.cells[s] = temp
-    end
+    insert!(r, s, v * coefficient)
   end
 end
 
@@ -240,7 +255,9 @@ Reverse the sign of the constant and all cells in the row.
 """
 function reverse_sign!(r::Row)
   r.constant = -r.constant
-  foreach(s -> r.cells[s] = -r.cells[s], keys(r.cells))
+  foreach(keys(r.cells)) do s
+    r.cells[s] = -r.cells[s]
+  end
 end
 
 """
@@ -255,10 +272,12 @@ be multiplied by the negative inverse of the target coefficient.
 The given symbol *must* exist in the row.
 """
 function solve!(r::Row, symbol::KiwiSymbol)
-  coeff = -1.0 / r.cells[symbol]
+  coefficient = -1.0 / r.cells[symbol]
   delete!(r.cells, symbol)
-  r.constant *= coeff
-  foreach(s -> r.cells[s] *= coeff, keys(r.cells))
+  r.constant *= coefficient
+  foreach(keys(r.cells)) do s
+    r.cells[s] *= coefficient
+  end
 end
 
 """
@@ -282,10 +301,12 @@ Get the coefficient for the given symbol.
 
 If the symbol does not exist in the row, zero will be returned.
 """
-function coefficient(r::Row, symbol::KiwiSymbol)
+function coefficient_for(r::Row, symbol::KiwiSymbol)
   return get(r.cells, symbol, 0)
 end
 
+"""Test whether a row is composed of all dummy variables."""
+all_dummies(row::Row) = all(kind(k) == :DUMMY for k in keys(row.cells))
 
 """
 Substitute a symbol with the data from another row.
@@ -297,11 +318,54 @@ expression 3 * a * y + a * c + b.
 If the symbol does not exist in the row, this is a no-op.
 """
 function substitute!(r::Row, symbol::KiwiSymbol, row::Row)
-  coefficient = pop!(r.cells, symbol, 0)
-  if coefficient != 0
+  coefficient = pop!(r.cells, symbol, nothing)
+  if !isnothing(coefficient)
     insert!(r, row, coefficient)
+    true
+  else
+    false
   end
 end
+
+"""
+Get the first SLACK or ERROR symbol in the row.
+
+If no such symbol is present, and Invalid symbol will be returned.
+"""
+function any_pivotable_symbol(row::Row)
+  for (k, v) in row.cells
+    if k in [:SLACK, :ERROR]
+      return k
+    end
+  end
+  return KiwiSymbol() # Return invalid symbol
+end
+
+"""
+Compute the entering variable for a pivot operation.
+
+This method will return first symbol in the objective function which
+is non-dummy and has a coefficient less than zero. If no symbol meets
+the criteria, it means the objective function is at a minimum, and an
+invalid symbol is returned.
+"""
+function get_entering_symbol(objective::Row)
+  for (k, v) in objective.cells
+    if kind(k) != :DUMMY && v < 0
+      return k
+    end
+  end
+  return KiwiSymbol()
+end
+
+struct EditConstraintException <: Exception end
+struct DuplicateConstraintException <: Exception end
+struct UnsatisfiableConstraintException <: Exception end
+struct UnknownConstraintException <: Exception end
+struct DuplicateEditVariableException <: Exception end
+struct BadRequiredStrengthException <: Exception end
+struct UnknownEditVariableException <: Exception end
+struct InternalSolverException <: Exception end
 
 mutable struct Tag
   marker::KiwiSymbol
@@ -316,13 +380,6 @@ mutable struct EditInfo
   constant::Float64
 end
 
-struct DuplicateConstraintException <: Exception end
-struct UnsatisfiableConstraintException <: Exception end
-struct UnknownConstraintException <: Exception end
-struct DuplicateEditVariableException <: Exception end
-struct RequiredFailureException <: Exception end
-struct UnknownEditVariableException <: Exception end
-
 function EditInfo(constraint::Constraint, tag::Tag, constant::Real)
   return EditInfo(tag, constraint, constant)
 end
@@ -332,23 +389,20 @@ mutable struct Solver
   rows::OrderedDict{KiwiSymbol,Row}
   vars::OrderedDict{Variable,KiwiSymbol}
   edits::OrderedDict{Variable,EditInfo}
-  infeasibleRows::Vector
+  infeasible_rows::Vector{KiwiSymbol} # should never contain EXTERNAL
   objective::Row
   artificial::Row
-  symbolIDCounter::UInt32
+  id_tick::UInt32
 end
 
 function Solver()
   return Solver(OrderedDict(), OrderedDict(), OrderedDict(), OrderedDict(), [], Row(), Row(), UInt32(0))
 end
 
-function KiwiSymbol(s::Solver, kind::SymbolKind.T)
-  s.symbolIDCounter += 1
-  KiwiSymbol(s.symbolIDCounter, kind)
+function KiwiSymbol(s::Solver, kind::KiwiSymbolKind)
+  s.id_tick += 1
+  KiwiSymbol(s.id_tick, kind)
 end
-
-"""Test whether a row is composed of all dummy variables."""
-all_dummies(row::Row) = all(kind(k) == SymbolKind.DUMMY for k in keys(row.cells))
 
 """
 Add a constraint to the solver.
@@ -363,16 +417,14 @@ function add_constraint(s::Solver, constraint::Constraint)
     throw(DuplicateConstraintException())
   end
 
-  # Creating a row causes symbols to be reserved for the variables
-  # in the constraint.
-  # If this method exits with an exception, 
-  # then solver must be reinitialized.
+  # Creating a row causes symbols to be reserved for the variables in the constraint.
+  # If this method exits with an exception, then solver must be reinitialized.
   tag = Tag()
   row = create_row(s, constraint, tag)
-
   if invalid(tag.marker)
     error("Internal error. Got $tag for constraint $constraint")
   end
+  subject = choose_subject(row, tag)
 
   #  If chooseSubject could not find a valid entering symbol, one
   #  last option is available if the entire row is composed of
@@ -380,19 +432,17 @@ function add_constraint(s::Solver, constraint::Constraint)
   #  this represents redundant constraints and the new dummy
   #  marker can enter the basis. If the constant is non-zero,
   #  then it represents an unsatisfiable constraint.
-  subject = choose_subject(row, tag)
-
-  # If an entering symbol still isn't found, then the row must
-  # be added using an artificial variable. If that fails, then
-  # the row represents an unsatisfiable constraint.
   if invalid(subject) && all_dummies(row)
-    if !(row.constant ≈ 0.0)
+    if !(is_approx_zero(row.constant))
       throw(UnsatisfiableConstraintException())
     else
       subject = tag.marker
     end
   end
 
+  # If an entering symbol still isn't found, then the row must
+  # be added using an artificial variable. If that fails, then
+  # the row represents an unsatisfiable constraint.
   if invalid(subject)
     if !add_with_artificial_variable(s, row)
       throw(UnsatisfiableConstraintException())
@@ -412,88 +462,6 @@ function add_constraint(s::Solver, constraint::Constraint)
 end
 
 """
-Remove the effects of an error marker on the objective function.
-"""
-function remove_marker_effects(s::Solver, marker::KiwiSymbol, strength::Real)
-  row = get(s.rows, marker, nothing)
-  if isnothing(row)
-    insert!(s.objective, marker, -strength)
-  else
-    insert!(s.objective, row, -strength)
-  end
-end
-
-"""
-Remove the effects of a constraint on the objective function.
-"""
-function remove_constraint_effects(s::Solver, constraint::Constraint, tag::Tag)
-  if kind(tag.marker) == SymbolKind.ERROR
-    remove_marker_effects(s, tag.marker, constraint.strength)
-  elseif kind(tag.other) == SymbolKind.ERROR
-    remove_marker_effects(s, tag.other, constraint.strength)
-  end
-end
-
-
-"""
-Compute the leaving row for a marker variable.
-
-This method will return an iterator to the row in the row map
-which holds the given marker variable. The row will be chosen
-according to the following precedence:
-
-1) The row with a restricted basic varible and a negative coefficient
-    for the marker with the smallest ratio of -constant / coefficient.
-
-2) The row with a restricted basic variable and the smallest ratio
-    of constant / coefficient.
-
-3) The last unrestricted row which contains the marker.
-
-If the marker does not exist in any row, the row map end() iterator
-will be returned. This indicates an internal solver error since
-the marker *should* exist somewhere in the tableau.
-"""
-function get_marker_leaving_row(solver::Solver, marker::KiwiSymbol)
-  r1 = Inf
-  r2 = Inf
-
-  first = nothing
-  second = nothing
-  third = nothing
-  for (s, candidateRow) in solver.rows
-    c = coefficient(candidateRow, marker)
-    if c == 0.0
-      continue
-    end
-
-    if kind(s) == SymbolKind.EXTERNAL
-      third = candidateRow
-    elseif c < 0
-      r = -candidateRow.constant / c
-      if r < r1
-        r1 = r
-        first = candidateRow
-      end
-    else
-      r = candidateRow.constant / c
-      if r < r2
-        r2 = r
-        second = candidateRow
-      end
-    end
-  end
-
-  if !isnothing(first)
-    return first
-  elseif !isnothing(second)
-    return second
-  end
-  return third
-end
-
-
-"""
 Remove a constraint from the solver.
 
 Errors:
@@ -504,9 +472,9 @@ function remove_constraint(s::Solver, constraint::Constraint)
   tag = get(s.cns, constraint, nothing)
   if isnothing(tag)
     throw(UnknownConstraintException(""))
+  else
+    delete!(s.cns, constraint)
   end
-
-  delete!(s.cns, constraint)
 
   # Remove the error effects from the objective function
   # *before* pivoting, or substitutions into the objective
@@ -542,19 +510,100 @@ function remove_constraint(s::Solver, constraint::Constraint)
   optimize!(s, s.objective)
 end
 
+"""
+Remove the effects of an error marker on the objective function.
+"""
+function remove_marker_effects(s::Solver, marker::KiwiSymbol, strength::Real)
+  row = get(s.rows, marker, nothing)
+  if isnothing(row)
+    insert!(s.objective, marker, -strength)
+  else
+    insert!(s.objective, row, -strength)
+  end
+end
+
+"""
+Remove the effects of a constraint on the objective function.
+"""
+function remove_constraint_effects(s::Solver, constraint::Constraint, tag::Tag)
+  if kind(tag.marker) == :ERROR
+    remove_marker_effects(s, tag.marker, constraint.strength)
+  elseif kind(tag.other) == :ERROR
+    remove_marker_effects(s, tag.other, constraint.strength)
+  end
+end
+
+
+"""
+Compute the leaving row for a marker variable.
+
+This method will return an iterator to the row in the row map
+which holds the given marker variable. The row will be chosen
+according to the following precedence:
+
+1) The row with a restricted basic varible and a negative coefficient
+    for the marker with the smallest ratio of -constant / coefficient.
+
+2) The row with a restricted basic variable and the smallest ratio
+    of constant / coefficient.
+
+3) The last unrestricted row which contains the marker.
+
+If the marker does not exist in any row, the row map end() iterator
+will be returned. This indicates an internal solver error since
+the marker *should* exist somewhere in the tableau.
+"""
+function get_marker_leaving_row(solver::Solver, marker::KiwiSymbol)
+  r1 = Inf
+  r2 = Inf
+
+  first = nothing
+  second = nothing
+  third = nothing
+  for (s, candidateRow) in solver.rows
+    c = coefficient_for(candidateRow, marker)
+    if c == 0.0
+      continue
+    end
+
+    if kind(s) == :EXTERNAL
+      third = candidateRow
+    elseif c < 0
+      r = -candidateRow.constant / c
+      if r < r1
+        r1 = r
+        first = candidateRow
+      end
+    else
+      r = candidateRow.constant / c
+      if r < r2
+        r2 = r
+        second = candidateRow
+      end
+    end
+  end
+
+  if !isnothing(first)
+    return first
+  elseif !isnothing(second)
+    return second
+  end
+  return third
+end
+
 """Test whether a constraint has been added to the solver."""
-hasConstraint(s::Solver, constraint::Constraint) = constraint in keys(s.cns)
+has_constraint(s::Solver, constraint::Constraint) = constraint in keys(s.cns)
 
 """
 Add an edit variable to the solver.
 
-This method should be called before the `suggestValue` method is
+This method should be called before the `suggest_value` method is
 used to supply a suggested value for the given edit variable.
 
 Errors:
 
-- DuplicateEditVariable: The given edit variable has already been added to the solver.
-- BadRequiredStrength: The given strength is >= required.
+- DuplicateEditVariableException: The given edit variable has already been added to the solver.
+- BadRequiredStrengthException: The given strength is >= required.
 """
 function add_edit_variable(s::Solver, variable::Variable, strength::Real)
   if variable in keys(s.edits)
@@ -564,21 +613,16 @@ function add_edit_variable(s::Solver, variable::Variable, strength::Real)
   strength = clamp_strength(strength)
 
   if strength == REQUIRED
-    throw(RequiredFailureException(""))
+    throw(BadRequiredStrengthException(""))
   end
 
-  constraint = Constraint(Expression(Term(variable)), strength, RelationalOperator.EQ)
+  constraint = Constraint(Expression(Term(variable)), strength, :(==))
 
-  try
-    add_constraint(s, constraint)
-  catch e
-    @warn "Exception caught" exception = (e, catch_backtrace())
-  end
+  add_constraint(s, constraint)
 
   info = EditInfo(constraint, get(s.cns, constraint, nothing), 0.0)
   s.edits[variable] = info
 end
-
 
 """
 Remove an edit variable from the solver.
@@ -634,10 +678,10 @@ function get_dual_entering_symbol(solver::Solver, row::Row)
   ratio = Inf
   result = KiwiSymbol()
   for (s, currentCell) in row.cells
-    if kind(s) != SymbolKind.DUMMY
+    if kind(s) != :DUMMY
       if currentCell > 0
-        coeff = coefficient(solver.objective, s)
-        r = coeff / currentCell
+        coefficient = coefficient_for(solver.objective, s)
+        r = coefficient / currentCell
         if r < ratio
           ratio = r
           result = s
@@ -658,11 +702,11 @@ optimal and feasible.
 
 Errors:
 
-- InternalSolverError: The system cannot be dual optimized.
+- InternalSolverException: The system cannot be dual optimized.
 """
 function dual_optimize!(s::Solver)
-  while length(s.infeasibleRows) > 0
-    leaving = pop!(s.infeasibleRows)
+  while length(s.infeasible_rows) > 0
+    leaving = pop!(s.infeasible_rows)
     row = get(s.rows, leaving, nothing)
     if !isnothing(row) && row.constant < 0
       entering = get_dual_entering_symbol(s, row)
@@ -699,7 +743,7 @@ function suggest_value(s::Solver, variable::Variable, value::Real)
   row = get(s.rows, info.tag.marker, nothing)
   if !isnothing(row)
     if add!(row, -delta) < 0
-      push!(s.infeasibleRows, info.tag.marker)
+      push!(s.infeasible_rows, info.tag.marker)
     end
     dual_optimize!(s)
     return
@@ -709,7 +753,7 @@ function suggest_value(s::Solver, variable::Variable, value::Real)
   row = get(s.rows, info.tag.other, nothing)
   if !isnothing(row)
     if add!(row, delta) < 0
-      push!(s.infeasibleRows, info.tag.other)
+      push!(s.infeasible_rows, info.tag.other)
     end
     dual_optimize!(s)
     return
@@ -717,9 +761,9 @@ function suggest_value(s::Solver, variable::Variable, value::Real)
 
   # Otherwise update each row where the error variables exist.
   for (sym, currentRow) in s.rows
-    coeff = coefficient(currentRow, info.tag.marker)
-    if coeff != 0 && add!(currentRow, delta * coeff) < 0 && kind(sym) != SymbolKind.EXTERNAL
-      push!(s.infeasibleRows, sym)
+    coefficient = coefficient_for(currentRow, info.tag.marker)
+    if coefficient != 0 && add!(currentRow, delta * coefficient) < 0 && kind(sym) != :EXTERNAL
+      push!(s.infeasible_rows, sym)
     end
   end
 
@@ -741,7 +785,7 @@ end
 function get_var_symbol(s::Solver, variable::Variable)
   result = get(s.vars, variable, KiwiSymbol())
   if invalid(result)
-    result = KiwiSymbol(s, SymbolKind.EXTERNAL)
+    result = KiwiSymbol(s, :EXTERNAL)
     s.vars[variable] = result
   end
   return result
@@ -770,7 +814,7 @@ function create_row(s::Solver, constraint::Constraint, tag::Tag)
 
   # Substitute the current basic variables into the row.
   for term in expression.terms
-    if !(term.coefficient ≈ 0.0)
+    if !(is_approx_zero(term.coefficient))
       symbol = get_var_symbol(s, term.variable)
       other_row = get(s.rows, symbol, nothing)
       if isnothing(other_row)
@@ -782,23 +826,23 @@ function create_row(s::Solver, constraint::Constraint, tag::Tag)
   end
 
   # Add the necessary slack, error, and dummy variables.
-  if constraint.op in [RelationalOperator.LE, RelationalOperator.GE]
-    coeff = (constraint.op == RelationalOperator.LE ? 1.0 : -1.0)
-    slack = KiwiSymbol(s, SymbolKind.SLACK)
+  if constraint.op in [:(<=), :(>=)]
+    coefficient = (constraint.op == :(<=) ? 1.0 : -1.0)
+    slack = KiwiSymbol(s, :SLACK)
     tag.marker = slack
-    insert!(row, slack, coeff)
+    insert!(row, slack, coefficient)
 
     if constraint.strength < REQUIRED
-      error = KiwiSymbol(s, SymbolKind.ERROR)
+      error = KiwiSymbol(s, :ERROR)
       tag.other = error
-      insert!(row, error, -coeff)
+      insert!(row, error, -coefficient)
       insert!(s.objective, error, constraint.strength)
     end
 
-  elseif constraint.op == RelationalOperator.EQ
+  elseif constraint.op == :(==)
     if constraint.strength < REQUIRED
-      errplus = KiwiSymbol(s, SymbolKind.ERROR)
-      errminus = KiwiSymbol(s, SymbolKind.ERROR)
+      errplus = KiwiSymbol(s, :ERROR)
+      errminus = KiwiSymbol(s, :ERROR)
       tag.marker = errplus
       tag.other = errminus
       insert!(row, errplus, -1.0)
@@ -806,7 +850,7 @@ function create_row(s::Solver, constraint::Constraint, tag::Tag)
       insert!(s.objective, errplus, constraint.strength)
       insert!(s.objective, errminus, constraint.strength)
     else
-      dummy = KiwiSymbol(s, SymbolKind.DUMMY)
+      dummy = KiwiSymbol(s, :DUMMY)
       tag.marker = dummy
       insert!(row, dummy)
     end
@@ -836,34 +880,19 @@ If a subject cannot be found, an invalid symbol will be returned.
 """
 function choose_subject(row::Row, tag::Tag)
   for s in keys(row.cells)
-    if kind(s) == SymbolKind.EXTERNAL
+    if kind(s) == :EXTERNAL
       return s
     end
   end
 
-  if tag.marker in [SymbolKind.SLACK, SymbolKind.ERROR] && coefficient(row, tag.marker) < 0
+  if tag.marker in [:SLACK, :ERROR] && coefficient_for(row, tag.marker) < 0
     return tag.marker
   end
 
-  if tag.other in [SymbolKind.SLACK, SymbolKind.ERROR] && coefficient(row, tag.other) < 0
+  if tag.other in [:SLACK, :ERROR] && coefficient_for(row, tag.other) < 0
     return tag.other
   end
 
-  return KiwiSymbol() # Return invalid symbol
-end
-
-
-"""
-Get the first Slack or Error symbol in the row.
-
-If no such symbol is present, and Invalid symbol will be returned.
-"""
-function any_pivotable_symbol(s::Solver, row::Row)
-  for (k, v) in row.cells
-    if k in [SymbolKind.SLACK, SymbolKind.ERROR]
-      return k
-    end
-  end
   return KiwiSymbol() # Return invalid symbol
 end
 
@@ -873,13 +902,13 @@ Add the row to the tableau using an artificial variable.
 This will return false if the constraint cannot be satisfied.
 """
 function add_with_artificial_variable(s::Solver, row::Row)
-  art = KiwiSymbol(s, SymbolKind.SLACK)
+  art = KiwiSymbol(s, :SLACK)
   s.rows[art] = deepcopy(row)
 
   s.artificial = deepcopy(row)
 
   optimize!(s, s.artificial)
-  success = s.artificial.constant ≈ 0.0
+  success = is_approx_zero(s.artificial.constant)
   s.artificial = Row()
 
   rowptr = get(s.rows, art, nothing)
@@ -895,7 +924,7 @@ function add_with_artificial_variable(s::Solver, row::Row)
       return success
     end
 
-    entering = any_pivotable_symbol(s, rowptr)
+    entering = any_pivotable_symbol(rowptr)
     if invalid(entering)
       return false
     end
@@ -924,8 +953,8 @@ function substitute!(s::Solver, symbol::KiwiSymbol, row::Row)
   for sym in keys(s.rows)
     r = s.rows[sym]
     substitute!(r, symbol, row)
-    if kind(sym) != SymbolKind.EXTERNAL && r.constant < 0
-      push!(s.infeasibleRows, sym)
+    if kind(sym) != :EXTERNAL && r.constant < 0
+      push!(s.infeasible_rows, sym)
     end
   end
 
@@ -934,23 +963,6 @@ function substitute!(s::Solver, symbol::KiwiSymbol, row::Row)
   if !isnothing(s.artificial)
     substitute!(s.artificial, symbol, row)
   end
-end
-
-"""
-Compute the entering variable for a pivot operation.
-
-This method will return first symbol in the objective function which
-is non-dummy and has a coefficient less than zero. If no symbol meets
-the criteria, it means the objective function is at a minimum, and an
-invalid symbol is returned.
-"""
-function get_entering_symbol(objective::Row)
-  for (k, v) in objective.cells
-    if kind(k) != SymbolKind.DUMMY && v < 0
-      return k
-    end
-  end
-  return KiwiSymbol()
 end
 
 """
@@ -965,8 +977,8 @@ function get_leaving_row(s::Solver, entering::KiwiSymbol)
   ratio = Inf
   result = Row() # Invalid row
   for (key, candidateRow) in s.rows
-    if kind(key) != SymbolKind.EXTERNAL
-      temp = coefficient(candidateRow, entering)
+    if kind(key) != :EXTERNAL
+      temp = coefficient_for(candidateRow, entering)
       if temp < 0
         temp_ratio = (-candidateRow.constant / temp)
         if temp_ratio < ratio
@@ -987,7 +999,7 @@ until the objective function reaches a minimum.
 
 Errors:
 
-- InternalSolverError: The value of the objective function is unbounded.
+- InternalSolverException: The value of the objective function is unbounded.
 """
 function optimize!(s::Solver, objective::Row)
   while true
@@ -1086,17 +1098,17 @@ end
 -(lhs::Real, rhs::Variable) = -rhs + lhs
 
 # Expression relations
-==(first::Expression, second::Expression) = Constraint(first - second, RelationalOperator.EQ)
+==(first::Expression, second::Expression) = Constraint(first - second, :(==))
 ==(expression::Expression, term::Term) = expression == Expression(term)
 ==(expression::Expression, variable::Variable) = expression == Term(variable)
 ==(expression::Expression, constant::Real) = expression == Expression(constant)
 
-<=(first::Expression, second::Expression) = Constraint(first - second, RelationalOperator.LE)
+<=(first::Expression, second::Expression) = Constraint(first - second, :(<=))
 <=(expression::Expression, term::Term) = expression <= Expression(term)
 <=(expression::Expression, variable::Variable) = expression <= Term(variable)
 <=(expression::Expression, constant::Real) = expression <= Expression(constant)
 
->=(first::Expression, second::Expression) = Constraint(first - second, RelationalOperator.GE)
+>=(first::Expression, second::Expression) = Constraint(first - second, :(>=))
 >=(expression::Expression, term::Term) = expression >= Expression(term)
 >=(expression::Expression, variable::Variable) = expression >= Term(variable)
 >=(expression::Expression, constant::Real) = expression >= Expression(constant)
@@ -1203,11 +1215,11 @@ end
       suggest(s, profit, 1000)
     end
 
-    @test profit.value ≈ 800
-    @test ale.value ≈ 12
-    @test beer.value ≈ 28
-    @test corn.value ≈ 480
-    @test hops.value ≈ 160
+    @test profit.value ≈ 800 atol = ϵ
+    @test ale.value ≈ 12 atol = ϵ
+    @test beer.value ≈ 28 atol = ϵ
+    @test corn.value ≈ 480 atol = ϵ
+    @test hops.value ≈ 160 atol = ϵ
     # underdefined constraint
     @test (malt.value ≈ 980 || malt.value ≈ 1190)
   end
