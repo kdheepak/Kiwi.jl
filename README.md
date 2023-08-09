@@ -10,3 +10,4 @@ KiwiConstraintSolver.jl is port of the efficient C++ implementation of the Casso
 
 - https://github.com/nucleic/kiwi
 - https://github.com/yglukhov/kiwi
+- https://github.com/schell/casuarius
