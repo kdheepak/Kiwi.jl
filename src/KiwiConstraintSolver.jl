@@ -362,7 +362,9 @@ function get_entering_symbol(objective::Row)
 end
 
 struct EditConstraintException <: Exception end
-struct DuplicateConstraintException <: Exception end
+struct DuplicateConstraintException <: Exception
+  value::String
+end
 struct UnsatisfiableConstraintException <: Exception end
 struct UnknownConstraintException <: Exception end
 struct DuplicateEditVariableException <: Exception end
@@ -417,7 +419,7 @@ Errors:
 """
 function add_constraint(s::Solver, constraint::Constraint)
   if haskey(s.cns, constraint)
-    throw(DuplicateConstraintException())
+    throw(DuplicateConstraintException("$constraint already exists"))
   end
 
   # Creating a row causes symbols to be reserved for the variables in the constraint.
