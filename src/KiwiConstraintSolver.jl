@@ -90,8 +90,8 @@ mutable struct Term
   end
 end
 
-isequal(t1::Term, t2::Term) = isequal(t1.variable, t2.variable)
-hash(t::Term) = hash(t.variable)
+isequal(t1::Term, t2::Term) = isequal(t1.variable, t2.variable) && t1.coefficient ≈ t2.coefficient
+hash(t::Term) = hash(string(t.coefficient) * string(hash(t.variable)))
 
 function value(t::Term)
   return t.coefficient * t.variable.value
@@ -109,8 +109,8 @@ mutable struct Expression
   end
 end
 
-isequal(e1::Expression, e2::Expression) = isequal(e1.terms, e2.terms)
-hash(e::Expression) = hash(e.terms)
+isequal(e1::Expression, e2::Expression) = isequal(e1.terms, e2.terms) && e1.constant ≈ e2.constant
+hash(e::Expression) = hash(string(e.constant) * string(hash(e.terms)))
 
 function Expression(constant::Real=0.0)
   return Expression(Term[], constant)
@@ -181,8 +181,8 @@ mutable struct Constraint
   end
 end
 
-isequal(c1::Constraint, c2::Constraint) = isequal(c1.expression, c2.expression) && c1.op == c2.op
-hash(c::Constraint) = hash(string(hash(c.expression)) * string(hash(c.op)))
+isequal(c1::Constraint, c2::Constraint) = isequal(c1.expression, c2.expression) && c1.op == c2.op && c1.weight ≈ c2.weight && c1.strength ≈ c2.strength
+hash(c::Constraint) = hash(string(c.weight) * string(c.strength) * string(hash(c.expression)) * string(c.op))
 
 function Constraint(e::Expression, op::RelationalOperator)
   return Constraint(e, REQUIRED, op)
@@ -363,8 +363,17 @@ end
 
 struct EditConstraintException <: Exception end
 struct DuplicateConstraintException <: Exception
-  value::String
+  constraint::Constraint
+  constraints::OrderedDict
 end
+function Base.showerror(io::IO, e::DuplicateConstraintException)
+  name = e.constraint
+  printstyled(io, "$(typeof(e)):\n\n$name\n\nalready found in\n")
+  for (k, v) in e.constraints
+    printstyled(io, "$k\n")
+  end
+end
+
 struct UnsatisfiableConstraintException <: Exception end
 struct UnknownConstraintException <: Exception end
 struct DuplicateEditVariableException <: Exception end
@@ -419,7 +428,7 @@ Errors:
 """
 function add_constraint(s::Solver, constraint::Constraint)
   if haskey(s.cns, constraint)
-    throw(DuplicateConstraintException("$constraint already exists"))
+    throw(DuplicateConstraintException(constraint, s.cns))
   end
 
   # Creating a row causes symbols to be reserved for the variables in the constraint.
