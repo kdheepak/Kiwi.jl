@@ -2,9 +2,7 @@
 CurrentModule = KiwiConstraintSolver
 ```
 
-# KiwiConstraintSolver
-
-Documentation for [KiwiConstraintSolver](https://github.com/kdheepak/KiwiConstraintSolver.jl).
+# [KiwiConstraintSolver](https://github.com/kdheepak/KiwiConstraintSolver.jl).
 
 ```@example
 using KiwiConstraintSolver
