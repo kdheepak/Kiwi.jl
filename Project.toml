@@ -1,7 +1,7 @@
 name = "KiwiConstraintSolver"
 uuid = "063317df-b1e6-4e84-b689-d7ba7b3726e4"
 authors = ["Dheepak Krishnamurthy"]
-version = "1.0.0"
+version = "1.0.1"
 
 [deps]
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
