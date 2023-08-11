@@ -181,6 +181,27 @@ mutable struct Constraint
   end
 end
 
+function _parse_macro_kwargs(kwargexprs)
+  kwargs = Dict{Symbol,Any}()
+  for ex in kwargexprs
+    ex.head == :(=) || error("Invalid kwarg: $ex ($(ex.head))")
+    name, value = ex.args[1], ex.args[2]
+    name isa Symbol || error("Invalid argument name: $name in $ex")
+    kwargs[name] = value
+  end
+  return kwargs
+end
+
+macro constraint(expr, kwargsexprs...)
+  kwargs = _parse_macro_kwargs(kwargsexprs)
+  strength = get(kwargs, :strength, REQUIRED)
+  quote
+    c = $(esc(expr))
+    c.strength = $(esc(strength))
+    c
+  end
+end
+
 isequal(c1::Constraint, c2::Constraint) = isequal(c1.expression, c2.expression) && c1.op == c2.op && c1.weight ≈ c2.weight && c1.strength ≈ c2.strength
 hash(c::Constraint) = hash(string(c.weight) * string(c.strength) * string(hash(c.expression)) * string(c.op))
 
@@ -1303,7 +1324,7 @@ end
   end
 end
 
-export Solver, Variable, Constraint, Expression, Term, add_constraint, update_variables, optimize!
+export Solver, Variable, Constraint, Expression, Term, add_constraint, update_variables, optimize!, @constraint
 
 end
 
