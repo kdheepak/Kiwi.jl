@@ -200,7 +200,7 @@ macro constraint(expr, kwargsexprs...)
   end
 end
 
-isequal(c1::Constraint, c2::Constraint) = isequal(c1.expression, c2.expression) && c1.op == c2.op && c1.weight ≈ c2.weight && c1.strength ≈ c2.strength
+isequal(c1::Constraint, c2::Constraint) = isequal(c1.expression, c2.expression) && c1.op == c2.op && is_approx_zero(c1.weight - c2.weight) && is_approx_zero(c1.strength - c2.strength)
 hash(c::Constraint) = hash(string(c.weight) * string(c.strength) * string(hash(c.expression)) * string(c.op))
 
 function Constraint(e::Expression, op::RelationalOperator)
@@ -212,7 +212,7 @@ function Constraint(other::Constraint, strength::Real)
 end
 
 function Base.show(io::IO, c::Constraint)
-  print(io, c.expression, " ", c.op, 0, " | strength = ", c.strength)
+  print(io, c.expression, " ", c.op, " ", 0, " | strength = ", c.strength)
 end
 
 mutable struct Row
@@ -447,7 +447,8 @@ Errors:
 """
 function add_constraint(s::Solver, constraint::Constraint)
   if haskey(s.cns, constraint)
-    throw(DuplicateConstraintException(constraint, s.cns))
+    @warn DuplicateConstraintException(constraint, s.cns)
+    return
   end
 
   # Creating a row causes symbols to be reserved for the variables in the constraint.
