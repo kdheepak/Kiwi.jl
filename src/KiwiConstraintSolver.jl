@@ -447,7 +447,9 @@ Errors:
 """
 function add_constraint(s::Solver, constraint::Constraint)
   if haskey(s.cns, constraint)
-    @warn DuplicateConstraintException(constraint, s.cns)
+    iob = IOBuffer()
+    Base.showerror(iob, DuplicateConstraintException(constraint, s.cns))
+    @warn String(take!(iob))
     return
   end
 
