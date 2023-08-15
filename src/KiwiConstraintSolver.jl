@@ -79,7 +79,7 @@ function name(v::Variable)
 end
 
 function Base.show(io::IO, v::Variable)
-  print(io, name(v), "(", v.value, ")")
+  print(io, name(v))
 end
 
 mutable struct Term
@@ -98,7 +98,11 @@ function value(t::Term)
 end
 
 function Base.show(io::IO, t::Term)
-  print(io, t.variable, " * ", t.coefficient)
+  if t.coefficient != 1.0
+    print(io, t.variable, " * ", t.coefficient)
+  else
+    print(io, t.variable)
+  end
 end
 
 mutable struct Expression
@@ -141,9 +145,9 @@ function negate(e::Expression)
 end
 
 function Base.show(io::IO, e::Expression)
-  print(io, e.constant)
+  print(io, e.constant, " + ")
   if !is_constant(e)
-    print(io, join(e.terms, ", "))
+    print(io, join(e.terms, " + "))
   end
 end
 
